@@ -1,10 +1,14 @@
 # Claude Usage — Pebble Time 2 watchface
 
+![screenshot](screenshot.png)
+
 [Usage4Claude](https://github.com/f-is-h/Usage4Claude)（macOSメニューバー常駐アプリ）と同じ発想で、
 Claude Code / Claude.ai の **5時間枠** と **7日枠** の使用率を Pebble Time 2（emery）の
 ウォッチフェイスにリング表示する。
 
 Pebbleアプリストアに同等の既存ウォッチフェイスは無し（2026年9月時点で確認）。
+
+ビルド済みの `.pbw` は [Releases](https://github.com/ponderingm/pebble-claude-usage/releases) からダウンロードできる。
 
 ## 仕組み
 
