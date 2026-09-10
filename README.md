@@ -64,6 +64,34 @@ package.json              プロジェクトマニフェスト（UUID・messageK
 
 `emery`（Pebble Time 2, 200x228, 64色）のみを対象にビルドする。他機種は未検証。
 
+## TODO（デザイン検討）
+
+現状はプロトタイプ段階。以下は今後デザインを詰める項目:
+
+- [ ] リングの配色を実機カラーe-paperで確認する（e-paperのディザリングでオレンジがエミュレータ上では赤寄りに見えている。閾値は `main.c` 冒頭の `THRESHOLD_WARN_PCT` / `THRESHOLD_DANGER_PCT`）
+- [ ] アプリアイコンをデザインする（現状未作成、Pebbleアプリ一覧でデフォルトアイコンのまま）
+- [ ] リングのスタイル自体の再検討（太さ・グラデーション・数値フォントサイズなど）
+- [ ] Clay設定画面のUI・文言を実機ブラウザで確認する（ヘッドレス開発機では未検証）
+- [ ] Opus/Sonnet週次枠など、表示指標を増やすかどうかの検討（現状は5時間枠・7日枠の2つのみ）
+- [ ] バッテリー残量・Bluetooth接続状態インジケータを追加するかどうか
+- [ ] gabbro（Pebble Round 2）等、他機種への対応要否
+
+## 使用したツール・スキル
+
+このプロトタイプは Claude Code を使って、以下を組み合わせて作成した:
+
+- [Usage4Claude](https://github.com/f-is-h/Usage4Claude) のソースコード（`Services/ClaudeOAuth*.swift` 等）を読み、
+  Anthropic の非公開OAuth使用量API（トークンリフレッシュ・使用量取得のURL/ヘッダー/レスポンス形式）を特定した。
+- [coredevices/pebble-watchface-agent-skill](https://github.com/coredevices/pebble-watchface-agent-skill)
+  （Core Devices公式のPebbleウォッチフェイス生成用Claude Codeスキル）を参照し、特に
+  `tutorials/c-watchface-tutorial/part4`（AppMessage + PebbleKit JSで外部APIを叩くパターン）と
+  `part6`（Clay設定画面のパターン）をベースに `src/c/main.c` / `src/pkjs/index.js` / `src/pkjs/config.js` を実装した。
+  同スキルの説明から `emery` = Pebble Time 2（200x228, 64色）であることも確認した。
+- Pebble Appstore ([apps.repebble.com](https://apps.repebble.com/)) を調査し、同等の既存ウォッチフェイスが
+  無いことを確認した上で開発した。
+- 実装確定前に、実際のOAuthリフレッシュトークンで使用量APIを一度叩き、レスポンスの実フィールド
+  （`utilization` / `resets_at` 等）を確認してから `pkjs/index.js` の仕様を決めた。
+
 ## ドキュメント
 
 - [Pebble SDK Documentation](https://developer.repebble.com/)
