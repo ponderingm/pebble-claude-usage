@@ -1,0 +1,37 @@
+{
+  "name": "pebble-claude-usage",
+  "author": "yamato.hannya",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {
+    "@rebble/clay": "^1.0.8"
+  },
+  "pebble": {
+    "displayName": "Claude Usage",
+    "uuid": "686ad3d6-964b-448c-aaf5-afa0c78f0b99",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "capabilities": [
+      "configurable"
+    ],
+    "messageKeys": [
+      "REQUEST_UPDATE",
+      "FIVE_HOUR_PCT",
+      "FIVE_HOUR_RESET_EPOCH",
+      "SEVEN_DAY_PCT",
+      "SEVEN_DAY_RESET_EPOCH",
+      "refresh_token",
+      "poll_interval_minutes"
+    ],
+    "resources": {
+      "media": []
+    }
+  }
+}

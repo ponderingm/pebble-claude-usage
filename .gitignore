@@ -1,0 +1,7 @@
+build/
+node_modules/
+.pebble-sdk
+.lock-waf_linux_build
+*.pbw
+*.pyc
+.DS_Store
