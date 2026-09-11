@@ -5,7 +5,7 @@
 
 #define SCREEN_W 200
 #define SCREEN_H 228
-#define FRAME_THICKNESS 28
+#define FRAME_THICKNESS 18
 #define FRAME_SIDE_THICKNESS 3
 #define BUS_LONG_WAIT_THRESHOLD_MIN 60
 
@@ -13,6 +13,13 @@
 
 #define BUS_LABEL_HOME_TO_WORK "Kiba"
 #define BUS_LABEL_WORK_TO_HOME "Honjo"
+
+// Dark Slate theme: near-black background, white text, status-color accents kept as-is.
+#define THEME_BG_COLOR GColorBlack
+#define THEME_TEXT_COLOR GColorWhite
+#define THEME_BORDER_COLOR GColorDarkGray
+#define THEME_ALERT_COLOR GColorRed
+#define THEME_BAR_TEXT_COLOR GColorBlack
 
 enum {
   PersistKeyFiveHourPct = 100,
@@ -119,26 +126,23 @@ static void draw_usage_bar(GContext *ctx, int pct, time_t reset_epoch, bool top)
     graphics_fill_rect(ctx, fill_rect, 0, GCornerNone);
   }
 
-  char pct_buf[16];
-  if (pct < 0) {
-    snprintf(pct_buf, sizeof(pct_buf), "%s --", top ? "5H" : "7D");
-  } else {
-    snprintf(pct_buf, sizeof(pct_buf), "%s %d%%", top ? "5H" : "7D", clamped_pct);
-  }
-  GRect pct_rect = GRect(4, y, SCREEN_W - 8, FRAME_THICKNESS - 12);
-  graphics_context_set_text_color(ctx, GColorBlack);
-  graphics_draw_text(ctx, pct_buf, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                      pct_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-
   char reset_buf[16];
   format_countdown(reset_epoch, reset_buf, sizeof(reset_buf));
-  GRect reset_rect = GRect(4, y + FRAME_THICKNESS - 13, SCREEN_W - 8, 12);
-  graphics_draw_text(ctx, reset_buf, fonts_get_system_font(FONT_KEY_GOTHIC_09),
-                      reset_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+
+  char buf[32];
+  if (pct < 0) {
+    snprintf(buf, sizeof(buf), "%s -- %s", top ? "5H" : "7D", reset_buf);
+  } else {
+    snprintf(buf, sizeof(buf), "%s %d%% %s", top ? "5H" : "7D", clamped_pct, reset_buf);
+  }
+  GRect text_rect = GRect(4, y - 1, SCREEN_W - 8, FRAME_THICKNESS + 2);
+  graphics_context_set_text_color(ctx, THEME_BAR_TEXT_COLOR);
+  graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_09),
+                      text_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 }
 
 static void draw_side_borders(GContext *ctx) {
-  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_context_set_fill_color(ctx, THEME_BORDER_COLOR);
   graphics_fill_rect(ctx,
                       GRect(0, FRAME_THICKNESS, FRAME_SIDE_THICKNESS, SCREEN_H - 2 * FRAME_THICKNESS),
                       0, GCornerNone);
@@ -152,12 +156,13 @@ static void draw_status_row(GContext *ctx, int y) {
   char battery_buf[8];
   snprintf(battery_buf, sizeof(battery_buf), "%d%%", s_battery_pct);
   GRect battery_rect = GRect(FRAME_SIDE_THICKNESS + 4, y, 70, 18);
-  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
   graphics_draw_text(ctx, battery_buf, fonts_get_system_font(FONT_KEY_GOTHIC_14),
                       battery_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
 
   if (!s_bluetooth_connected) {
     GRect bt_rect = GRect(SCREEN_W - FRAME_SIDE_THICKNESS - 70, y, 66, 18);
+    graphics_context_set_text_color(ctx, THEME_ALERT_COLOR);
     graphics_draw_text(ctx, "BT!", fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
                         bt_rect, GTextOverflowModeFill, GTextAlignmentRight, NULL);
   }
@@ -182,7 +187,7 @@ static void draw_weather_shape(GContext *ctx, GPoint center, int shape_id) {
       graphics_fill_circle(ctx, GPoint(center.x, center.y - 3), 8);
       break;
     case WeatherShapeFog:
-      graphics_context_set_stroke_color(ctx, GColorDarkGray);
+      graphics_context_set_stroke_color(ctx, GColorLightGray);
       for (int i = -1; i <= 1; i++) {
         graphics_draw_line(ctx, GPoint(center.x - 10, center.y + i * 5),
                             GPoint(center.x + 10, center.y + i * 5));
@@ -200,11 +205,11 @@ static void draw_weather_shape(GContext *ctx, GPoint center, int shape_id) {
     case WeatherShapeSnow:
       graphics_context_set_fill_color(ctx, GColorWhite);
       graphics_fill_circle(ctx, center, 8);
-      graphics_context_set_stroke_color(ctx, GColorBlack);
+      graphics_context_set_stroke_color(ctx, GColorLightGray);
       graphics_draw_circle(ctx, center, 8);
       break;
     case WeatherShapeStorm:
-      graphics_context_set_fill_color(ctx, GColorDarkGray);
+      graphics_context_set_fill_color(ctx, GColorLightGray);
       graphics_fill_circle(ctx, center, 8);
       graphics_context_set_fill_color(ctx, GColorYellow);
       graphics_fill_circle(ctx, GPoint(center.x, center.y + 8), 3);
@@ -223,7 +228,7 @@ static void draw_weather_row(GContext *ctx, int y) {
   char temp_buf[8];
   snprintf(temp_buf, sizeof(temp_buf), "%d°C", s_weather_temp_c);
   GRect temp_rect = GRect(SCREEN_W / 2 - 6, y, 60, 24);
-  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
   graphics_draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
                       temp_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
 }
@@ -250,7 +255,7 @@ static void draw_bus_row(GContext *ctx, int y) {
   char buf[24];
   snprintf(buf, sizeof(buf), "-> %s %s", label, wait_buf);
   GRect rect = GRect(FRAME_SIDE_THICKNESS + 4, y, SCREEN_W - 2 * (FRAME_SIDE_THICKNESS + 4), 22);
-  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
   graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
                       rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 }
@@ -383,14 +388,14 @@ static void window_load(Window *window) {
 
   s_date_layer = text_layer_create(GRect(0, FRAME_THICKNESS + 24, SCREEN_W, 20));
   text_layer_set_background_color(s_date_layer, GColorClear);
-  text_layer_set_text_color(s_date_layer, GColorBlack);
+  text_layer_set_text_color(s_date_layer, THEME_TEXT_COLOR);
   text_layer_set_font(s_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
   text_layer_set_text_alignment(s_date_layer, GTextAlignmentCenter);
   layer_add_child(window_layer, text_layer_get_layer(s_date_layer));
 
   s_time_layer = text_layer_create(GRect(0, FRAME_THICKNESS + 46, SCREEN_W, 60));
   text_layer_set_background_color(s_time_layer, GColorClear);
-  text_layer_set_text_color(s_time_layer, GColorBlack);
+  text_layer_set_text_color(s_time_layer, THEME_TEXT_COLOR);
   text_layer_set_font(s_time_layer, fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD));
   text_layer_set_text_alignment(s_time_layer, GTextAlignmentCenter);
   layer_add_child(window_layer, text_layer_get_layer(s_time_layer));
@@ -422,7 +427,7 @@ static void init(void) {
   load_persisted_values();
 
   s_window = window_create();
-  window_set_background_color(s_window, GColorWhite);
+  window_set_background_color(s_window, THEME_BG_COLOR);
   window_set_click_config_provider(s_window, click_config_provider);
   window_set_window_handlers(s_window, (WindowHandlers) {
     .load = window_load,
