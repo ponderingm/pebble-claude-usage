@@ -5,7 +5,7 @@
 
 #define SCREEN_W 200
 #define SCREEN_H 228
-#define FRAME_THICKNESS 9
+#define FRAME_THICKNESS 18
 #define FRAME_SIDE_THICKNESS 3
 #define BUS_LONG_WAIT_THRESHOLD_MIN 60
 #define BATTERY_LOW_PCT 20
@@ -15,16 +15,15 @@
 #define BUS_LABEL_HOME_TO_WORK "Kiba"
 #define BUS_LABEL_WORK_TO_HOME "Honjo"
 
-// Region layout, top to bottom: usage bar (bare color strip, no text) ->
-// Header (weather | bus) -> Body (date + time) -> Footer (5H | 7D detail)
+// Region layout, top to bottom: usage bar (percentage + reset countdown
+// drawn on the bar itself) -> Header (weather | bus) -> Body (date + time)
 // -> Status (battery / Bluetooth, icon-only) -> usage bar.
-#define HEADER_Y (FRAME_THICKNESS + 8)
-#define DIVIDER_1_Y (FRAME_THICKNESS + 44)
-#define DATE_LAYER_Y (FRAME_THICKNESS + 50)
-#define TIME_LAYER_Y (FRAME_THICKNESS + 70)
-#define DIVIDER_2_Y (FRAME_THICKNESS + 134)
-#define FOOTER_Y (FRAME_THICKNESS + 140)
-#define STATUS_Y (FRAME_THICKNESS + 178)
+#define HEADER_Y (FRAME_THICKNESS + 10)
+#define DIVIDER_1_Y (FRAME_THICKNESS + 46)
+#define DATE_LAYER_Y (FRAME_THICKNESS + 52)
+#define TIME_LAYER_Y (FRAME_THICKNESS + 72)
+#define DIVIDER_2_Y (FRAME_THICKNESS + 140)
+#define STATUS_Y (FRAME_THICKNESS + 148)
 
 // Dark Slate theme: near-black background, white text, status-color accents kept as-is.
 #define THEME_BG_COLOR GColorBlack
@@ -32,6 +31,7 @@
 #define THEME_BORDER_COLOR GColorDarkGray
 #define THEME_DIVIDER_COLOR GColorLightGray
 #define THEME_ALERT_COLOR GColorRed
+#define THEME_BAR_TEXT_COLOR GColorBlack
 
 enum {
   PersistKeyFiveHourPct = 100,
@@ -124,20 +124,33 @@ static GColor color_for_pct(int pct) {
   return GColorGreen;
 }
 
-static void draw_usage_bar(GContext *ctx, int pct, bool top) {
+static void draw_usage_bar(GContext *ctx, int pct, time_t reset_epoch, bool top) {
   int y = top ? 0 : (SCREEN_H - FRAME_THICKNESS);
   GRect track_rect = GRect(0, y, SCREEN_W, FRAME_THICKNESS);
   graphics_context_set_fill_color(ctx, GColorLightGray);
   graphics_fill_rect(ctx, track_rect, 0, GCornerNone);
 
-  if (pct < 0) {
-    return;
+  int clamped_pct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
+  if (pct >= 0) {
+    int fill_w = (SCREEN_W * clamped_pct) / 100;
+    GRect fill_rect = GRect(0, y, fill_w, FRAME_THICKNESS);
+    graphics_context_set_fill_color(ctx, color_for_pct(pct));
+    graphics_fill_rect(ctx, fill_rect, 0, GCornerNone);
   }
-  int clamped_pct = pct > 100 ? 100 : pct;
-  int fill_w = (SCREEN_W * clamped_pct) / 100;
-  GRect fill_rect = GRect(0, y, fill_w, FRAME_THICKNESS);
-  graphics_context_set_fill_color(ctx, color_for_pct(pct));
-  graphics_fill_rect(ctx, fill_rect, 0, GCornerNone);
+
+  char reset_buf[16];
+  format_countdown(reset_epoch, reset_buf, sizeof(reset_buf));
+
+  char buf[32];
+  if (pct < 0) {
+    snprintf(buf, sizeof(buf), "%s -- %s", top ? "5H" : "7D", reset_buf);
+  } else {
+    snprintf(buf, sizeof(buf), "%s %d%% %s", top ? "5H" : "7D", clamped_pct, reset_buf);
+  }
+  GRect text_rect = GRect(4, y - 1, SCREEN_W - 8, FRAME_THICKNESS + 2);
+  graphics_context_set_text_color(ctx, THEME_BAR_TEXT_COLOR);
+  graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_09),
+                      text_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 }
 
 static void draw_side_borders(GContext *ctx) {
@@ -198,42 +211,6 @@ static void draw_status_row(GContext *ctx, int y) {
   if (!s_bluetooth_connected) {
     draw_bt_disconnected_icon(ctx, GPoint(SCREEN_W / 2 + 24, y + 5));
   }
-}
-
-static void draw_footer_band(GContext *ctx, int y) {
-  char five_pct_buf[16];
-  char seven_pct_buf[16];
-  if (s_five_hour_pct < 0) {
-    snprintf(five_pct_buf, sizeof(five_pct_buf), "5H --");
-  } else {
-    snprintf(five_pct_buf, sizeof(five_pct_buf), "5H %d%%", s_five_hour_pct);
-  }
-  if (s_seven_day_pct < 0) {
-    snprintf(seven_pct_buf, sizeof(seven_pct_buf), "7D --");
-  } else {
-    snprintf(seven_pct_buf, sizeof(seven_pct_buf), "7D %d%%", s_seven_day_pct);
-  }
-
-  char five_reset_buf[16];
-  char seven_reset_buf[16];
-  format_countdown(s_five_hour_reset, five_reset_buf, sizeof(five_reset_buf));
-  format_countdown(s_seven_day_reset, seven_reset_buf, sizeof(seven_reset_buf));
-
-  int half_w = SCREEN_W / 2;
-  GRect five_pct_rect = GRect(FRAME_SIDE_THICKNESS + 6, y, half_w - FRAME_SIDE_THICKNESS - 10, 16);
-  GRect seven_pct_rect = GRect(half_w + 4, y, half_w - FRAME_SIDE_THICKNESS - 10, 16);
-  graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
-  graphics_draw_text(ctx, five_pct_buf, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                      five_pct_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-  graphics_draw_text(ctx, seven_pct_buf, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                      seven_pct_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-
-  GRect five_reset_rect = GRect(FRAME_SIDE_THICKNESS + 6, y + 15, half_w - FRAME_SIDE_THICKNESS - 10, 14);
-  GRect seven_reset_rect = GRect(half_w + 4, y + 15, half_w - FRAME_SIDE_THICKNESS - 10, 14);
-  graphics_draw_text(ctx, five_reset_buf, fonts_get_system_font(FONT_KEY_GOTHIC_09),
-                      five_reset_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-  graphics_draw_text(ctx, seven_reset_buf, fonts_get_system_font(FONT_KEY_GOTHIC_09),
-                      seven_reset_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 }
 
 static void draw_weather_shape(GContext *ctx, GPoint center, int shape_id) {
@@ -335,14 +312,13 @@ static void draw_header_band(GContext *ctx, int y) {
 }
 
 static void canvas_update_proc(Layer *layer, GContext *ctx) {
-  draw_usage_bar(ctx, s_five_hour_pct, true);
-  draw_usage_bar(ctx, s_seven_day_pct, false);
+  draw_usage_bar(ctx, s_five_hour_pct, s_five_hour_reset, true);
+  draw_usage_bar(ctx, s_seven_day_pct, s_seven_day_reset, false);
   draw_side_borders(ctx);
 
   draw_header_band(ctx, HEADER_Y);
   draw_divider(ctx, DIVIDER_1_Y);
   draw_divider(ctx, DIVIDER_2_Y);
-  draw_footer_band(ctx, FOOTER_Y);
   draw_status_row(ctx, STATUS_Y);
 }
 
