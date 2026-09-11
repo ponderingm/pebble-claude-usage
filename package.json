@@ -28,7 +28,11 @@
       "SEVEN_DAY_PCT",
       "SEVEN_DAY_RESET_EPOCH",
       "refresh_token",
-      "poll_interval_minutes"
+      "poll_interval_minutes",
+      "WEATHER_TEMP_C",
+      "WEATHER_CODE",
+      "BUS_DIRECTION",
+      "BUS_NEXT_MIN"
     ],
     "resources": {
       "media": []

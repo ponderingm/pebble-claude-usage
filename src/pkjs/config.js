@@ -30,6 +30,70 @@ module.exports = [
     ]
   },
   {
+    "type": "heading",
+    "defaultValue": "Weather"
+  },
+  {
+    "type": "toggle",
+    "messageKey": "weather_enabled",
+    "label": "Show Weather",
+    "defaultValue": true
+  },
+  {
+    "type": "heading",
+    "defaultValue": "Commute Bus"
+  },
+  {
+    "type": "text",
+    "defaultValue": "Toei Bus route Gyo-10 (Honjo-yonchome <-> Kiba-yonchome). Enter your home and work coordinates (decimal degrees) so the watch can tell which direction you are commuting and show the next departure."
+  },
+  {
+    "type": "toggle",
+    "messageKey": "bus_enabled",
+    "label": "Show Next Bus",
+    "defaultValue": true
+  },
+  {
+    "type": "input",
+    "messageKey": "home_lat",
+    "label": "Home Latitude",
+    "attributes": {
+      "type": "text",
+      "placeholder": "35.7100"
+    },
+    "defaultValue": ""
+  },
+  {
+    "type": "input",
+    "messageKey": "home_lon",
+    "label": "Home Longitude",
+    "attributes": {
+      "type": "text",
+      "placeholder": "139.8180"
+    },
+    "defaultValue": ""
+  },
+  {
+    "type": "input",
+    "messageKey": "work_lat",
+    "label": "Work Latitude",
+    "attributes": {
+      "type": "text",
+      "placeholder": "35.6720"
+    },
+    "defaultValue": ""
+  },
+  {
+    "type": "input",
+    "messageKey": "work_lon",
+    "label": "Work Longitude",
+    "attributes": {
+      "type": "text",
+      "placeholder": "139.8080"
+    },
+    "defaultValue": ""
+  },
+  {
     "type": "submit",
     "defaultValue": "Save Settings"
   }
