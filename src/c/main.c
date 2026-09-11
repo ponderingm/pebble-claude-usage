@@ -8,16 +8,28 @@
 #define FRAME_THICKNESS 18
 #define FRAME_SIDE_THICKNESS 3
 #define BUS_LONG_WAIT_THRESHOLD_MIN 60
+#define BATTERY_LOW_PCT 20
 
 #define WEATHER_TEMP_UNSET -1000
 
 #define BUS_LABEL_HOME_TO_WORK "Kiba"
 #define BUS_LABEL_WORK_TO_HOME "Honjo"
 
+// Mesh-style banded layout: two dividers split the interior into a
+// top band (weather | bus), a center band (date + time), and a
+// bottom band (battery | Bluetooth), instead of one long vertical stack.
+#define TOP_BAND_Y (FRAME_THICKNESS + 10)
+#define DIVIDER_1_Y (FRAME_THICKNESS + 46)
+#define DATE_LAYER_Y (FRAME_THICKNESS + 52)
+#define TIME_LAYER_Y (FRAME_THICKNESS + 72)
+#define DIVIDER_2_Y (FRAME_THICKNESS + 140)
+#define BOTTOM_BAND_Y (FRAME_THICKNESS + 148)
+
 // Dark Slate theme: near-black background, white text, status-color accents kept as-is.
 #define THEME_BG_COLOR GColorBlack
 #define THEME_TEXT_COLOR GColorWhite
 #define THEME_BORDER_COLOR GColorDarkGray
+#define THEME_DIVIDER_COLOR GColorLightGray
 #define THEME_ALERT_COLOR GColorRed
 #define THEME_BAR_TEXT_COLOR GColorBlack
 
@@ -152,19 +164,63 @@ static void draw_side_borders(GContext *ctx) {
                       0, GCornerNone);
 }
 
-static void draw_status_row(GContext *ctx, int y) {
+static void draw_divider(GContext *ctx, int y) {
+  graphics_context_set_stroke_color(ctx, THEME_DIVIDER_COLOR);
+  graphics_draw_line(ctx, GPoint(FRAME_SIDE_THICKNESS + 6, y),
+                      GPoint(SCREEN_W - FRAME_SIDE_THICKNESS - 6, y));
+}
+
+static void draw_battery_icon(GContext *ctx, GPoint top_left, int pct) {
+  int body_w = 20;
+  int body_h = 10;
+  GRect body_rect = GRect(top_left.x, top_left.y, body_w, body_h);
+  graphics_context_set_stroke_color(ctx, THEME_TEXT_COLOR);
+  graphics_draw_rect(ctx, body_rect);
+  graphics_context_set_fill_color(ctx, THEME_TEXT_COLOR);
+  graphics_fill_rect(ctx, GRect(top_left.x + body_w, top_left.y + 3, 2, 4), 0, GCornerNone);
+
+  int clamped_pct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
+  int fill_w = ((body_w - 4) * clamped_pct) / 100;
+  graphics_context_set_fill_color(ctx, pct <= BATTERY_LOW_PCT ? THEME_ALERT_COLOR : THEME_TEXT_COLOR);
+  graphics_fill_rect(ctx, GRect(top_left.x + 2, top_left.y + 2, fill_w, body_h - 4), 0, GCornerNone);
+}
+
+static void draw_bt_disconnected_icon(GContext *ctx, GPoint center) {
+  graphics_context_set_stroke_color(ctx, THEME_ALERT_COLOR);
+  graphics_draw_circle(ctx, center, 7);
+  graphics_draw_line(ctx, GPoint(center.x - 4, center.y - 4), GPoint(center.x + 4, center.y + 4));
+  graphics_draw_line(ctx, GPoint(center.x - 4, center.y + 4), GPoint(center.x + 4, center.y - 4));
+}
+
+static void draw_bus_icon(GContext *ctx, GPoint center) {
+  GRect body_rect = GRect(center.x - 9, center.y - 6, 18, 10);
+  graphics_context_set_fill_color(ctx, THEME_TEXT_COLOR);
+  graphics_fill_rect(ctx, body_rect, 2, GCornersTop);
+  graphics_context_set_fill_color(ctx, THEME_BG_COLOR);
+  graphics_fill_circle(ctx, GPoint(center.x - 4, center.y + 4), 2);
+  graphics_fill_circle(ctx, GPoint(center.x + 4, center.y + 4), 2);
+}
+
+static void draw_bottom_band(GContext *ctx, int y) {
+  // Center the battery block when there's no Bluetooth alert to pair it
+  // with, instead of leaving the right half of the band empty.
+  int battery_x = s_bluetooth_connected ? (SCREEN_W - 70) / 2 : FRAME_SIDE_THICKNESS + 6;
+
+  draw_battery_icon(ctx, GPoint(battery_x, y), s_battery_pct);
+
   char battery_buf[8];
   snprintf(battery_buf, sizeof(battery_buf), "%d%%", s_battery_pct);
-  GRect battery_rect = GRect(FRAME_SIDE_THICKNESS + 4, y, 70, 18);
+  GRect battery_rect = GRect(battery_x + 26, y - 5, 50, 20);
   graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
   graphics_draw_text(ctx, battery_buf, fonts_get_system_font(FONT_KEY_GOTHIC_14),
                       battery_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
 
   if (!s_bluetooth_connected) {
-    GRect bt_rect = GRect(SCREEN_W - FRAME_SIDE_THICKNESS - 70, y, 66, 18);
+    draw_bt_disconnected_icon(ctx, GPoint(SCREEN_W / 2 + 30, y + 5));
+    GRect bt_rect = GRect(SCREEN_W / 2 + 42, y - 5, 50, 20);
     graphics_context_set_text_color(ctx, THEME_ALERT_COLOR);
-    graphics_draw_text(ctx, "BT!", fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                        bt_rect, GTextOverflowModeFill, GTextAlignmentRight, NULL);
+    graphics_draw_text(ctx, "BT", fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+                        bt_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
   }
 }
 
@@ -219,20 +275,6 @@ static void draw_weather_shape(GContext *ctx, GPoint center, int shape_id) {
   }
 }
 
-static void draw_weather_row(GContext *ctx, int y) {
-  if (s_weather_temp_c == WEATHER_TEMP_UNSET) {
-    return;
-  }
-  draw_weather_shape(ctx, GPoint(SCREEN_W / 2 - 26, y + 8), s_weather_shape_id);
-
-  char temp_buf[8];
-  snprintf(temp_buf, sizeof(temp_buf), "%d°C", s_weather_temp_c);
-  GRect temp_rect = GRect(SCREEN_W / 2 - 6, y, 60, 24);
-  graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
-  graphics_draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-                      temp_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
-}
-
 static void format_bus_wait(int minutes, char *buf, size_t buf_len) {
   if (minutes < BUS_LONG_WAIT_THRESHOLD_MIN) {
     snprintf(buf, buf_len, "%dmin", minutes);
@@ -243,21 +285,41 @@ static void format_bus_wait(int minutes, char *buf, size_t buf_len) {
   snprintf(buf, buf_len, "%dh%02dm", hours, mins);
 }
 
-static void draw_bus_row(GContext *ctx, int y) {
-  if (s_bus_next_min < 0) {
-    return;
+static void draw_top_band(GContext *ctx, int y) {
+  bool has_weather = (s_weather_temp_c != WEATHER_TEMP_UNSET);
+  bool has_bus = (s_bus_next_min >= 0);
+
+  // Center whichever block is showing when the other one is absent,
+  // instead of leaving half the band empty.
+  int weather_x = has_bus ? FRAME_SIDE_THICKNESS + 16 : SCREEN_W / 2 - 28;
+  int bus_x = has_weather ? SCREEN_W / 2 + 24 : SCREEN_W / 2 - 10;
+
+  if (has_weather) {
+    draw_weather_shape(ctx, GPoint(weather_x, y + 8), s_weather_shape_id);
+
+    char temp_buf[8];
+    snprintf(temp_buf, sizeof(temp_buf), "%d°C", s_weather_temp_c);
+    GRect temp_rect = GRect(weather_x + 16, y, 56, 24);
+    graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
+    graphics_draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+                        temp_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
   }
-  const char *label = (s_bus_direction == BusDirectionHomeToWork)
-                          ? BUS_LABEL_HOME_TO_WORK
-                          : BUS_LABEL_WORK_TO_HOME;
-  char wait_buf[16];
-  format_bus_wait(s_bus_next_min, wait_buf, sizeof(wait_buf));
-  char buf[24];
-  snprintf(buf, sizeof(buf), "-> %s %s", label, wait_buf);
-  GRect rect = GRect(FRAME_SIDE_THICKNESS + 4, y, SCREEN_W - 2 * (FRAME_SIDE_THICKNESS + 4), 22);
-  graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
-  graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-                      rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+
+  if (has_bus) {
+    const char *label = (s_bus_direction == BusDirectionHomeToWork)
+                            ? BUS_LABEL_HOME_TO_WORK
+                            : BUS_LABEL_WORK_TO_HOME;
+    char wait_buf[16];
+    format_bus_wait(s_bus_next_min, wait_buf, sizeof(wait_buf));
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%s %s", label, wait_buf);
+
+    draw_bus_icon(ctx, GPoint(bus_x, y + 8));
+    GRect rect = GRect(bus_x + 12, y, 60, 20);
+    graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
+    graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_14),
+                        rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+  }
 }
 
 static void canvas_update_proc(Layer *layer, GContext *ctx) {
@@ -265,9 +327,10 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   draw_usage_bar(ctx, s_seven_day_pct, s_seven_day_reset, false);
   draw_side_borders(ctx);
 
-  draw_status_row(ctx, FRAME_THICKNESS + 4);
-  draw_weather_row(ctx, FRAME_THICKNESS + 108);
-  draw_bus_row(ctx, FRAME_THICKNESS + 138);
+  draw_top_band(ctx, TOP_BAND_Y);
+  draw_divider(ctx, DIVIDER_1_Y);
+  draw_divider(ctx, DIVIDER_2_Y);
+  draw_bottom_band(ctx, BOTTOM_BAND_Y);
 }
 
 static void request_update(void) {
@@ -386,14 +449,14 @@ static void load_persisted_values(void) {
 static void window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
 
-  s_date_layer = text_layer_create(GRect(0, FRAME_THICKNESS + 24, SCREEN_W, 20));
+  s_date_layer = text_layer_create(GRect(0, DATE_LAYER_Y, SCREEN_W, 20));
   text_layer_set_background_color(s_date_layer, GColorClear);
   text_layer_set_text_color(s_date_layer, THEME_TEXT_COLOR);
   text_layer_set_font(s_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
   text_layer_set_text_alignment(s_date_layer, GTextAlignmentCenter);
   layer_add_child(window_layer, text_layer_get_layer(s_date_layer));
 
-  s_time_layer = text_layer_create(GRect(0, FRAME_THICKNESS + 46, SCREEN_W, 60));
+  s_time_layer = text_layer_create(GRect(0, TIME_LAYER_Y, SCREEN_W, 60));
   text_layer_set_background_color(s_time_layer, GColorClear);
   text_layer_set_text_color(s_time_layer, THEME_TEXT_COLOR);
   text_layer_set_font(s_time_layer, fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD));
