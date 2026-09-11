@@ -5,8 +5,9 @@
 
 #define SCREEN_W 200
 #define SCREEN_H 228
-#define FRAME_THICKNESS 14
+#define FRAME_THICKNESS 28
 #define FRAME_SIDE_THICKNESS 3
+#define BUS_LONG_WAIT_THRESHOLD_MIN 60
 
 #define WEATHER_TEMP_UNSET -1000
 
@@ -104,7 +105,7 @@ static GColor color_for_pct(int pct) {
   return GColorGreen;
 }
 
-static void draw_usage_bar(GContext *ctx, int pct, bool top) {
+static void draw_usage_bar(GContext *ctx, int pct, time_t reset_epoch, bool top) {
   int y = top ? 0 : (SCREEN_H - FRAME_THICKNESS);
   GRect track_rect = GRect(0, y, SCREEN_W, FRAME_THICKNESS);
   graphics_context_set_fill_color(ctx, GColorLightGray);
@@ -118,16 +119,22 @@ static void draw_usage_bar(GContext *ctx, int pct, bool top) {
     graphics_fill_rect(ctx, fill_rect, 0, GCornerNone);
   }
 
-  char buf[16];
+  char pct_buf[16];
   if (pct < 0) {
-    snprintf(buf, sizeof(buf), "%s --", top ? "5H" : "7D");
+    snprintf(pct_buf, sizeof(pct_buf), "%s --", top ? "5H" : "7D");
   } else {
-    snprintf(buf, sizeof(buf), "%s %d%%", top ? "5H" : "7D", clamped_pct);
+    snprintf(pct_buf, sizeof(pct_buf), "%s %d%%", top ? "5H" : "7D", clamped_pct);
   }
-  GRect text_rect = GRect(4, y - 1, SCREEN_W - 8, FRAME_THICKNESS + 2);
+  GRect pct_rect = GRect(4, y, SCREEN_W - 8, FRAME_THICKNESS - 12);
   graphics_context_set_text_color(ctx, GColorBlack);
-  graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                      text_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  graphics_draw_text(ctx, pct_buf, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+                      pct_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+
+  char reset_buf[16];
+  format_countdown(reset_epoch, reset_buf, sizeof(reset_buf));
+  GRect reset_rect = GRect(4, y + FRAME_THICKNESS - 13, SCREEN_W - 8, 12);
+  graphics_draw_text(ctx, reset_buf, fonts_get_system_font(FONT_KEY_GOTHIC_09),
+                      reset_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 }
 
 static void draw_side_borders(GContext *ctx) {
@@ -221,6 +228,16 @@ static void draw_weather_row(GContext *ctx, int y) {
                       temp_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
 }
 
+static void format_bus_wait(int minutes, char *buf, size_t buf_len) {
+  if (minutes < BUS_LONG_WAIT_THRESHOLD_MIN) {
+    snprintf(buf, buf_len, "%dmin", minutes);
+    return;
+  }
+  int hours = minutes / 60;
+  int mins = minutes % 60;
+  snprintf(buf, buf_len, "%dh%02dm", hours, mins);
+}
+
 static void draw_bus_row(GContext *ctx, int y) {
   if (s_bus_next_min < 0) {
     return;
@@ -228,37 +245,24 @@ static void draw_bus_row(GContext *ctx, int y) {
   const char *label = (s_bus_direction == BusDirectionHomeToWork)
                           ? BUS_LABEL_HOME_TO_WORK
                           : BUS_LABEL_WORK_TO_HOME;
+  char wait_buf[16];
+  format_bus_wait(s_bus_next_min, wait_buf, sizeof(wait_buf));
   char buf[24];
-  snprintf(buf, sizeof(buf), "-> %s %dmin", label, s_bus_next_min);
+  snprintf(buf, sizeof(buf), "-> %s %s", label, wait_buf);
   GRect rect = GRect(FRAME_SIDE_THICKNESS + 4, y, SCREEN_W - 2 * (FRAME_SIDE_THICKNESS + 4), 22);
   graphics_context_set_text_color(ctx, GColorBlack);
   graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
                       rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 }
 
-static void draw_reset_row(GContext *ctx, int y) {
-  char five_buf[16];
-  char seven_buf[16];
-  format_countdown(s_five_hour_reset, five_buf, sizeof(five_buf));
-  format_countdown(s_seven_day_reset, seven_buf, sizeof(seven_buf));
-
-  char buf[40];
-  snprintf(buf, sizeof(buf), "5H:%s  7D:%s", five_buf, seven_buf);
-  GRect rect = GRect(4, y, SCREEN_W - 8, 16);
-  graphics_context_set_text_color(ctx, GColorBlack);
-  graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_14),
-                      rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-}
-
 static void canvas_update_proc(Layer *layer, GContext *ctx) {
-  draw_usage_bar(ctx, s_five_hour_pct, true);
-  draw_usage_bar(ctx, s_seven_day_pct, false);
+  draw_usage_bar(ctx, s_five_hour_pct, s_five_hour_reset, true);
+  draw_usage_bar(ctx, s_seven_day_pct, s_seven_day_reset, false);
   draw_side_borders(ctx);
 
   draw_status_row(ctx, FRAME_THICKNESS + 4);
-  draw_weather_row(ctx, 128);
-  draw_bus_row(ctx, 156);
-  draw_reset_row(ctx, 188);
+  draw_weather_row(ctx, FRAME_THICKNESS + 108);
+  draw_bus_row(ctx, FRAME_THICKNESS + 138);
 }
 
 static void request_update(void) {
