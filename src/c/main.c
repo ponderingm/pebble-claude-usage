@@ -15,17 +15,17 @@
 #define BUS_LABEL_HOME_TO_WORK "Kiba"
 #define BUS_LABEL_WORK_TO_HOME "Honjo"
 
-// Region layout, top to bottom: usage bar (percentage + reset countdown
-// drawn on the bar itself) -> Header (weather | bus) -> Body (date + time)
-// -> Footer (reserved, currently empty, for future info) -> Status
-// (battery / Bluetooth, icon-only) -> usage bar.
+// Region layout, top to bottom: usage bar (percentage + reset countdown,
+// with the battery icon overlapping its top-left corner) -> Header
+// (weather | bus) -> Body (date + time) -> Footer (reserved, currently
+// empty, for future info) -> Status (Bluetooth, icon-only) -> usage bar.
 #define HEADER_Y (FRAME_THICKNESS + 10)
 #define DIVIDER_1_Y (FRAME_THICKNESS + 46)
 #define DATE_LAYER_Y (FRAME_THICKNESS + 52)
 #define TIME_LAYER_Y (FRAME_THICKNESS + 72)
 #define DIVIDER_2_Y (FRAME_THICKNESS + 140)
 #define FOOTER_Y (FRAME_THICKNESS + 146)
-#define STATUS_Y (FRAME_THICKNESS + 178)
+#define STATUS_Y (SCREEN_H - FRAME_THICKNESS - 18)
 
 // Dark Slate theme: near-black background, white text, status-color accents kept as-is.
 #define THEME_BG_COLOR GColorBlack
@@ -211,14 +211,10 @@ static void draw_footer_band(GContext *ctx, int y) {
 }
 
 static void draw_status_row(GContext *ctx, int y) {
-  // Icon-only status row: battery is centered alone when Bluetooth is
-  // connected (nothing to pair it with), otherwise the two icons sit
-  // side by side.
-  int battery_x = s_bluetooth_connected ? SCREEN_W / 2 - 10 : SCREEN_W / 2 - 32;
-  draw_battery_icon(ctx, GPoint(battery_x, y), s_battery_pct);
-
+  // Battery moved to overlap the top usage bar (see canvas_update_proc),
+  // so this row is Bluetooth-only now: an icon shown only when disconnected.
   if (!s_bluetooth_connected) {
-    draw_bt_disconnected_icon(ctx, GPoint(SCREEN_W / 2 + 24, y + 5));
+    draw_bt_disconnected_icon(ctx, GPoint(SCREEN_W / 2, y + 5));
   }
 }
 
@@ -324,6 +320,10 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   draw_usage_bar(ctx, s_five_hour_pct, s_five_hour_reset, true);
   draw_usage_bar(ctx, s_seven_day_pct, s_seven_day_reset, false);
   draw_side_borders(ctx);
+
+  // Battery is icon-only, so it's fine to sit right on top of the 5H bar
+  // instead of taking up its own row.
+  draw_battery_icon(ctx, GPoint(FRAME_SIDE_THICKNESS + 2, 1), s_battery_pct);
 
   draw_header_band(ctx, HEADER_Y);
   draw_divider(ctx, DIVIDER_1_Y);
