@@ -2,20 +2,69 @@
 
 #define THRESHOLD_WARN_PCT 70
 #define THRESHOLD_DANGER_PCT 90
-#define RING_DIAMETER 80
-#define RING_THICKNESS 10
-#define RING_GAP 20
-#define RING_TOP_OFFSET 30
+
+#define SCREEN_W 200
+#define SCREEN_H 228
+#define FRAME_THICKNESS 12
+#define FRAME_SIDE_THICKNESS 3
+#define BUS_LONG_WAIT_THRESHOLD_MIN 60
+#define BATTERY_LOW_PCT 20
+
+#define WEATHER_TEMP_UNSET -1000
+
+#define BUS_LABEL_HOME_TO_WORK "Kiba"
+#define BUS_LABEL_WORK_TO_HOME "Honjo"
+
+// Region layout, top to bottom: usage bar (percentage + reset countdown,
+// with the battery icon overlapping its top-left corner) -> Header
+// (weather | bus) -> Body (date + time) -> Footer (reserved, currently
+// empty, for future info) -> Status (Bluetooth, icon-only) -> usage bar.
+#define HEADER_Y (FRAME_THICKNESS + 10)
+#define DIVIDER_1_Y (FRAME_THICKNESS + 46)
+#define DATE_LAYER_Y (FRAME_THICKNESS + 52)
+#define TIME_LAYER_Y (FRAME_THICKNESS + 72)
+#define DIVIDER_2_Y (FRAME_THICKNESS + 140)
+#define FOOTER_Y (FRAME_THICKNESS + 146)
+#define STATUS_Y (SCREEN_H - FRAME_THICKNESS - 18)
+
+// Dark Slate theme: near-black background, white text, status-color accents kept as-is.
+#define THEME_BG_COLOR GColorBlack
+#define THEME_TEXT_COLOR GColorWhite
+#define THEME_BORDER_COLOR GColorDarkGray
+#define THEME_DIVIDER_COLOR GColorLightGray
+#define THEME_ALERT_COLOR GColorRed
+#define THEME_BAR_TEXT_COLOR GColorBlack
 
 enum {
   PersistKeyFiveHourPct = 100,
   PersistKeyFiveHourReset = 101,
   PersistKeySevenDayPct = 102,
   PersistKeySevenDayReset = 103,
+  PersistKeyWeatherTempC = 104,
+  PersistKeyWeatherShapeId = 105,
+  PersistKeyBusDirection = 106,
+  PersistKeyBusNextMin = 107,
+};
+
+enum {
+  WeatherShapeSun = 0,
+  WeatherShapeCloudSun = 1,
+  WeatherShapeCloud = 2,
+  WeatherShapeFog = 3,
+  WeatherShapeRain = 4,
+  WeatherShapeSnow = 5,
+  WeatherShapeStorm = 6,
+  WeatherShapeUnknown = 7,
+};
+
+enum {
+  BusDirectionHomeToWork = 0,
+  BusDirectionWorkToHome = 1,
 };
 
 static Window *s_window;
 static TextLayer *s_time_layer;
+static TextLayer *s_date_layer;
 static Layer *s_canvas_layer;
 
 static int s_five_hour_pct = -1;
@@ -23,14 +72,26 @@ static int s_seven_day_pct = -1;
 static time_t s_five_hour_reset = 0;
 static time_t s_seven_day_reset = 0;
 
+static int s_battery_pct = 100;
+static bool s_bluetooth_connected = true;
+
+static int s_weather_temp_c = WEATHER_TEMP_UNSET;
+static int s_weather_shape_id = WeatherShapeUnknown;
+
+static int s_bus_direction = -1;
+static int s_bus_next_min = -1;
+
 static void update_time(void) {
   time_t temp = time(NULL);
   struct tm *tick_time = localtime(&temp);
 
   static char s_time_buffer[8];
-  strftime(s_time_buffer, sizeof(s_time_buffer),
-           clock_is_24h_style() ? "%H:%M" : "%I:%M", tick_time);
+  strftime(s_time_buffer, sizeof(s_time_buffer), "%H:%M", tick_time);
   text_layer_set_text(s_time_layer, s_time_buffer);
+
+  static char s_date_buffer[16];
+  strftime(s_date_buffer, sizeof(s_date_buffer), "%m-%d (%a)", tick_time);
+  text_layer_set_text(s_date_layer, s_date_buffer);
 }
 
 static void format_countdown(time_t reset_epoch, char *buf, size_t buf_len) {
@@ -65,56 +126,210 @@ static GColor color_for_pct(int pct) {
   return GColorGreen;
 }
 
-static void draw_metric(GContext *ctx, GRect ring_rect, const char *label,
-                         int pct, time_t reset_epoch) {
-  GRect label_rect = GRect(ring_rect.origin.x - 10, ring_rect.origin.y - 22,
-                            ring_rect.size.w + 20, 20);
-  graphics_context_set_text_color(ctx, GColorBlack);
-  graphics_draw_text(ctx, label, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-                      label_rect, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
-
+static void draw_usage_bar(GContext *ctx, int pct, time_t reset_epoch, bool top) {
+  int y = top ? 0 : (SCREEN_H - FRAME_THICKNESS);
+  GRect track_rect = GRect(0, y, SCREEN_W, FRAME_THICKNESS);
   graphics_context_set_fill_color(ctx, GColorLightGray);
-  graphics_fill_radial(ctx, ring_rect, GOvalScaleModeFitCircle, RING_THICKNESS,
-                        DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(360));
+  graphics_fill_rect(ctx, track_rect, 0, GCornerNone);
 
   int clamped_pct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
   if (pct >= 0) {
+    int fill_w = (SCREEN_W * clamped_pct) / 100;
+    GRect fill_rect = GRect(0, y, fill_w, FRAME_THICKNESS);
     graphics_context_set_fill_color(ctx, color_for_pct(pct));
-    graphics_fill_radial(ctx, ring_rect, GOvalScaleModeFitCircle, RING_THICKNESS,
-                          DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(360 * clamped_pct / 100));
+    graphics_fill_rect(ctx, fill_rect, 0, GCornerNone);
   }
-
-  char pct_buf[8];
-  if (pct < 0) {
-    snprintf(pct_buf, sizeof(pct_buf), "--");
-  } else {
-    snprintf(pct_buf, sizeof(pct_buf), "%d%%", clamped_pct);
-  }
-  GRect pct_rect = GRect(ring_rect.origin.x, ring_rect.origin.y + (ring_rect.size.h / 2) - 12,
-                          ring_rect.size.w, 24);
-  graphics_context_set_text_color(ctx, GColorBlack);
-  graphics_draw_text(ctx, pct_buf, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-                      pct_rect, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 
   char reset_buf[16];
   format_countdown(reset_epoch, reset_buf, sizeof(reset_buf));
-  GRect reset_rect = GRect(ring_rect.origin.x - 10, ring_rect.origin.y + ring_rect.size.h + 4,
-                            ring_rect.size.w + 20, 20);
-  graphics_draw_text(ctx, reset_buf, fonts_get_system_font(FONT_KEY_GOTHIC_14),
-                      reset_rect, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+
+  char buf[32];
+  if (pct < 0) {
+    snprintf(buf, sizeof(buf), "%s -- %s", top ? "5H" : "7D", reset_buf);
+  } else {
+    snprintf(buf, sizeof(buf), "%s %d%% %s", top ? "5H" : "7D", clamped_pct, reset_buf);
+  }
+  GRect text_rect = GRect(4, y - 1, SCREEN_W - 8, FRAME_THICKNESS + 2);
+  graphics_context_set_text_color(ctx, THEME_BAR_TEXT_COLOR);
+  graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_09),
+                      text_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+}
+
+static void draw_side_borders(GContext *ctx) {
+  graphics_context_set_fill_color(ctx, THEME_BORDER_COLOR);
+  graphics_fill_rect(ctx,
+                      GRect(0, FRAME_THICKNESS, FRAME_SIDE_THICKNESS, SCREEN_H - 2 * FRAME_THICKNESS),
+                      0, GCornerNone);
+  graphics_fill_rect(ctx,
+                      GRect(SCREEN_W - FRAME_SIDE_THICKNESS, FRAME_THICKNESS,
+                            FRAME_SIDE_THICKNESS, SCREEN_H - 2 * FRAME_THICKNESS),
+                      0, GCornerNone);
+}
+
+static void draw_divider(GContext *ctx, int y) {
+  graphics_context_set_stroke_color(ctx, THEME_DIVIDER_COLOR);
+  graphics_draw_line(ctx, GPoint(FRAME_SIDE_THICKNESS + 6, y),
+                      GPoint(SCREEN_W - FRAME_SIDE_THICKNESS - 6, y));
+}
+
+static void draw_battery_icon(GContext *ctx, GPoint top_left, int pct) {
+  int body_w = 20;
+  int body_h = 10;
+  GRect body_rect = GRect(top_left.x, top_left.y, body_w, body_h);
+  graphics_context_set_stroke_color(ctx, THEME_TEXT_COLOR);
+  graphics_draw_rect(ctx, body_rect);
+  graphics_context_set_fill_color(ctx, THEME_TEXT_COLOR);
+  graphics_fill_rect(ctx, GRect(top_left.x + body_w, top_left.y + 3, 2, 4), 0, GCornerNone);
+
+  int clamped_pct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
+  int fill_w = ((body_w - 4) * clamped_pct) / 100;
+  graphics_context_set_fill_color(ctx, pct <= BATTERY_LOW_PCT ? THEME_ALERT_COLOR : THEME_TEXT_COLOR);
+  graphics_fill_rect(ctx, GRect(top_left.x + 2, top_left.y + 2, fill_w, body_h - 4), 0, GCornerNone);
+}
+
+static void draw_bt_disconnected_icon(GContext *ctx, GPoint center) {
+  graphics_context_set_stroke_color(ctx, THEME_ALERT_COLOR);
+  graphics_draw_circle(ctx, center, 7);
+  graphics_draw_line(ctx, GPoint(center.x - 4, center.y - 4), GPoint(center.x + 4, center.y + 4));
+  graphics_draw_line(ctx, GPoint(center.x - 4, center.y + 4), GPoint(center.x + 4, center.y - 4));
+}
+
+static void draw_bus_icon(GContext *ctx, GPoint center) {
+  GRect body_rect = GRect(center.x - 9, center.y - 6, 18, 10);
+  graphics_context_set_fill_color(ctx, THEME_TEXT_COLOR);
+  graphics_fill_rect(ctx, body_rect, 2, GCornersTop);
+  graphics_context_set_fill_color(ctx, THEME_BG_COLOR);
+  graphics_fill_circle(ctx, GPoint(center.x - 4, center.y + 4), 2);
+  graphics_fill_circle(ctx, GPoint(center.x + 4, center.y + 4), 2);
+}
+
+static void draw_footer_band(GContext *ctx, int y) {
+  // Intentionally empty: reserved space between Body and Status for
+  // whatever gets added next (steps, next event, etc).
+  (void)ctx;
+  (void)y;
+}
+
+static void draw_status_row(GContext *ctx, int y) {
+  // Battery moved to overlap the top usage bar (see canvas_update_proc),
+  // so this row is Bluetooth-only now: an icon shown only when disconnected.
+  if (!s_bluetooth_connected) {
+    draw_bt_disconnected_icon(ctx, GPoint(SCREEN_W / 2, y + 5));
+  }
+}
+
+static void draw_weather_shape(GContext *ctx, GPoint center, int shape_id) {
+  switch (shape_id) {
+    case WeatherShapeSun:
+      graphics_context_set_fill_color(ctx, GColorOrange);
+      graphics_fill_circle(ctx, center, 10);
+      break;
+    case WeatherShapeCloudSun:
+      graphics_context_set_fill_color(ctx, GColorOrange);
+      graphics_fill_circle(ctx, GPoint(center.x - 4, center.y - 2), 7);
+      graphics_context_set_fill_color(ctx, GColorLightGray);
+      graphics_fill_circle(ctx, GPoint(center.x + 4, center.y + 3), 8);
+      break;
+    case WeatherShapeCloud:
+      graphics_context_set_fill_color(ctx, GColorLightGray);
+      graphics_fill_circle(ctx, GPoint(center.x - 5, center.y + 2), 7);
+      graphics_fill_circle(ctx, GPoint(center.x + 5, center.y + 2), 7);
+      graphics_fill_circle(ctx, GPoint(center.x, center.y - 3), 8);
+      break;
+    case WeatherShapeFog:
+      graphics_context_set_stroke_color(ctx, GColorLightGray);
+      for (int i = -1; i <= 1; i++) {
+        graphics_draw_line(ctx, GPoint(center.x - 10, center.y + i * 5),
+                            GPoint(center.x + 10, center.y + i * 5));
+      }
+      break;
+    case WeatherShapeRain:
+      graphics_context_set_fill_color(ctx, GColorLightGray);
+      graphics_fill_circle(ctx, center, 8);
+      graphics_context_set_stroke_color(ctx, GColorBlue);
+      for (int i = -1; i <= 1; i++) {
+        graphics_draw_line(ctx, GPoint(center.x + i * 6, center.y + 6),
+                            GPoint(center.x + i * 6 - 2, center.y + 12));
+      }
+      break;
+    case WeatherShapeSnow:
+      graphics_context_set_fill_color(ctx, GColorWhite);
+      graphics_fill_circle(ctx, center, 8);
+      graphics_context_set_stroke_color(ctx, GColorLightGray);
+      graphics_draw_circle(ctx, center, 8);
+      break;
+    case WeatherShapeStorm:
+      graphics_context_set_fill_color(ctx, GColorLightGray);
+      graphics_fill_circle(ctx, center, 8);
+      graphics_context_set_fill_color(ctx, GColorYellow);
+      graphics_fill_circle(ctx, GPoint(center.x, center.y + 8), 3);
+      break;
+    default:
+      break;
+  }
+}
+
+static void format_bus_wait(int minutes, char *buf, size_t buf_len) {
+  if (minutes < BUS_LONG_WAIT_THRESHOLD_MIN) {
+    snprintf(buf, buf_len, "%dmin", minutes);
+    return;
+  }
+  int hours = minutes / 60;
+  int mins = minutes % 60;
+  snprintf(buf, buf_len, "%dh%02dm", hours, mins);
+}
+
+static void draw_header_band(GContext *ctx, int y) {
+  bool has_weather = (s_weather_temp_c != WEATHER_TEMP_UNSET);
+  bool has_bus = (s_bus_next_min >= 0);
+
+  // Center whichever block is showing when the other one is absent,
+  // instead of leaving half the band empty.
+  int weather_x = has_bus ? FRAME_SIDE_THICKNESS + 16 : SCREEN_W / 2 - 28;
+  int bus_x = has_weather ? SCREEN_W / 2 + 24 : SCREEN_W / 2 - 10;
+
+  if (has_weather) {
+    draw_weather_shape(ctx, GPoint(weather_x, y + 8), s_weather_shape_id);
+
+    char temp_buf[8];
+    snprintf(temp_buf, sizeof(temp_buf), "%d°C", s_weather_temp_c);
+    GRect temp_rect = GRect(weather_x + 16, y, 56, 24);
+    graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
+    graphics_draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+                        temp_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+  }
+
+  if (has_bus) {
+    const char *label = (s_bus_direction == BusDirectionHomeToWork)
+                            ? BUS_LABEL_HOME_TO_WORK
+                            : BUS_LABEL_WORK_TO_HOME;
+    char wait_buf[16];
+    format_bus_wait(s_bus_next_min, wait_buf, sizeof(wait_buf));
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%s %s", label, wait_buf);
+
+    draw_bus_icon(ctx, GPoint(bus_x, y + 8));
+    GRect rect = GRect(bus_x + 12, y, 60, 20);
+    graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
+    graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_14),
+                        rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+  }
 }
 
 static void canvas_update_proc(Layer *layer, GContext *ctx) {
-  GRect bounds = layer_get_bounds(layer);
-  int total_w = RING_DIAMETER * 2 + RING_GAP;
-  int start_x = (bounds.size.w - total_w) / 2;
+  draw_usage_bar(ctx, s_five_hour_pct, s_five_hour_reset, true);
+  draw_usage_bar(ctx, s_seven_day_pct, s_seven_day_reset, false);
+  draw_side_borders(ctx);
 
-  GRect five_hour_rect = GRect(start_x, RING_TOP_OFFSET, RING_DIAMETER, RING_DIAMETER);
-  GRect seven_day_rect = GRect(start_x + RING_DIAMETER + RING_GAP, RING_TOP_OFFSET,
-                                RING_DIAMETER, RING_DIAMETER);
+  // Battery is icon-only, so it's fine to sit right on top of the 5H bar
+  // instead of taking up its own row.
+  draw_battery_icon(ctx, GPoint(FRAME_SIDE_THICKNESS + 2, 1), s_battery_pct);
 
-  draw_metric(ctx, five_hour_rect, "5H", s_five_hour_pct, s_five_hour_reset);
-  draw_metric(ctx, seven_day_rect, "7D", s_seven_day_pct, s_seven_day_reset);
+  draw_header_band(ctx, HEADER_Y);
+  draw_divider(ctx, DIVIDER_1_Y);
+  draw_divider(ctx, DIVIDER_2_Y);
+  draw_footer_band(ctx, FOOTER_Y);
+  draw_status_row(ctx, STATUS_Y);
 }
 
 static void request_update(void) {
@@ -139,11 +354,25 @@ static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   layer_mark_dirty(s_canvas_layer);
 }
 
+static void battery_callback(BatteryChargeState charge_state) {
+  s_battery_pct = charge_state.charge_percent;
+  layer_mark_dirty(s_canvas_layer);
+}
+
+static void bluetooth_callback(bool connected) {
+  s_bluetooth_connected = connected;
+  layer_mark_dirty(s_canvas_layer);
+}
+
 static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
   Tuple *five_hour_pct_tuple = dict_find(iterator, MESSAGE_KEY_FIVE_HOUR_PCT);
   Tuple *five_hour_reset_tuple = dict_find(iterator, MESSAGE_KEY_FIVE_HOUR_RESET_EPOCH);
   Tuple *seven_day_pct_tuple = dict_find(iterator, MESSAGE_KEY_SEVEN_DAY_PCT);
   Tuple *seven_day_reset_tuple = dict_find(iterator, MESSAGE_KEY_SEVEN_DAY_RESET_EPOCH);
+  Tuple *weather_temp_tuple = dict_find(iterator, MESSAGE_KEY_WEATHER_TEMP_C);
+  Tuple *weather_shape_tuple = dict_find(iterator, MESSAGE_KEY_WEATHER_CODE);
+  Tuple *bus_direction_tuple = dict_find(iterator, MESSAGE_KEY_BUS_DIRECTION);
+  Tuple *bus_next_min_tuple = dict_find(iterator, MESSAGE_KEY_BUS_NEXT_MIN);
 
   if (five_hour_pct_tuple) {
     s_five_hour_pct = (int)five_hour_pct_tuple->value->int32;
@@ -160,6 +389,22 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   if (seven_day_reset_tuple) {
     s_seven_day_reset = (time_t)seven_day_reset_tuple->value->int32;
     persist_write_int(PersistKeySevenDayReset, (int32_t)s_seven_day_reset);
+  }
+  if (weather_temp_tuple) {
+    s_weather_temp_c = (int)weather_temp_tuple->value->int32;
+    persist_write_int(PersistKeyWeatherTempC, s_weather_temp_c);
+  }
+  if (weather_shape_tuple) {
+    s_weather_shape_id = (int)weather_shape_tuple->value->int32;
+    persist_write_int(PersistKeyWeatherShapeId, s_weather_shape_id);
+  }
+  if (bus_direction_tuple) {
+    s_bus_direction = (int)bus_direction_tuple->value->int32;
+    persist_write_int(PersistKeyBusDirection, s_bus_direction);
+  }
+  if (bus_next_min_tuple) {
+    s_bus_next_min = (int)bus_next_min_tuple->value->int32;
+    persist_write_int(PersistKeyBusNextMin, s_bus_next_min);
   }
 
   layer_mark_dirty(s_canvas_layer);
@@ -186,28 +431,57 @@ static void load_persisted_values(void) {
   if (persist_exists(PersistKeySevenDayReset)) {
     s_seven_day_reset = (time_t)persist_read_int(PersistKeySevenDayReset);
   }
+  if (persist_exists(PersistKeyWeatherTempC)) {
+    s_weather_temp_c = persist_read_int(PersistKeyWeatherTempC);
+  }
+  if (persist_exists(PersistKeyWeatherShapeId)) {
+    s_weather_shape_id = persist_read_int(PersistKeyWeatherShapeId);
+  }
+  if (persist_exists(PersistKeyBusDirection)) {
+    s_bus_direction = persist_read_int(PersistKeyBusDirection);
+  }
+  if (persist_exists(PersistKeyBusNextMin)) {
+    s_bus_next_min = persist_read_int(PersistKeyBusNextMin);
+  }
 }
 
 static void window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
-  GRect bounds = layer_get_bounds(window_layer);
 
-  s_time_layer = text_layer_create(GRect(0, 5, bounds.size.w, 50));
+  s_date_layer = text_layer_create(GRect(0, DATE_LAYER_Y, SCREEN_W, 20));
+  text_layer_set_background_color(s_date_layer, GColorClear);
+  text_layer_set_text_color(s_date_layer, THEME_TEXT_COLOR);
+  text_layer_set_font(s_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_text_alignment(s_date_layer, GTextAlignmentCenter);
+  layer_add_child(window_layer, text_layer_get_layer(s_date_layer));
+
+  s_time_layer = text_layer_create(GRect(0, TIME_LAYER_Y, SCREEN_W, 60));
   text_layer_set_background_color(s_time_layer, GColorClear);
-  text_layer_set_text_color(s_time_layer, GColorBlack);
-  text_layer_set_font(s_time_layer, fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD));
+  text_layer_set_text_color(s_time_layer, THEME_TEXT_COLOR);
+  text_layer_set_font(s_time_layer, fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS));
   text_layer_set_text_alignment(s_time_layer, GTextAlignmentCenter);
   layer_add_child(window_layer, text_layer_get_layer(s_time_layer));
 
-  s_canvas_layer = layer_create(GRect(0, 60, bounds.size.w, bounds.size.h - 60));
+  s_canvas_layer = layer_create(GRect(0, 0, SCREEN_W, SCREEN_H));
   layer_set_update_proc(s_canvas_layer, canvas_update_proc);
   layer_add_child(window_layer, s_canvas_layer);
+
+  s_battery_pct = battery_state_service_peek().charge_percent;
+  battery_state_service_subscribe(battery_callback);
+
+  s_bluetooth_connected = connection_service_peek_pebble_app_connection();
+  connection_service_subscribe((ConnectionHandlers) {
+    .pebble_app_connection_handler = bluetooth_callback,
+  });
 
   update_time();
 }
 
 static void window_unload(Window *window) {
+  battery_state_service_unsubscribe();
+  connection_service_unsubscribe();
   text_layer_destroy(s_time_layer);
+  text_layer_destroy(s_date_layer);
   layer_destroy(s_canvas_layer);
 }
 
@@ -215,7 +489,7 @@ static void init(void) {
   load_persisted_values();
 
   s_window = window_create();
-  window_set_background_color(s_window, GColorWhite);
+  window_set_background_color(s_window, THEME_BG_COLOR);
   window_set_click_config_provider(s_window, click_config_provider);
   window_set_window_handlers(s_window, (WindowHandlers) {
     .load = window_load,
