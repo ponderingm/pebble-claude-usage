@@ -5,7 +5,7 @@
 
 #define SCREEN_W 200
 #define SCREEN_H 228
-#define FRAME_THICKNESS 18
+#define FRAME_THICKNESS 9
 #define FRAME_SIDE_THICKNESS 3
 #define BUS_LONG_WAIT_THRESHOLD_MIN 60
 #define BATTERY_LOW_PCT 20
@@ -15,15 +15,16 @@
 #define BUS_LABEL_HOME_TO_WORK "Kiba"
 #define BUS_LABEL_WORK_TO_HOME "Honjo"
 
-// Mesh-style banded layout: two dividers split the interior into a
-// top band (weather | bus), a center band (date + time), and a
-// bottom band (battery | Bluetooth), instead of one long vertical stack.
-#define TOP_BAND_Y (FRAME_THICKNESS + 10)
-#define DIVIDER_1_Y (FRAME_THICKNESS + 46)
-#define DATE_LAYER_Y (FRAME_THICKNESS + 52)
-#define TIME_LAYER_Y (FRAME_THICKNESS + 72)
-#define DIVIDER_2_Y (FRAME_THICKNESS + 140)
-#define BOTTOM_BAND_Y (FRAME_THICKNESS + 148)
+// Region layout, top to bottom: usage bar (bare color strip, no text) ->
+// Header (weather | bus) -> Body (date + time) -> Footer (5H | 7D detail)
+// -> Status (battery / Bluetooth, icon-only) -> usage bar.
+#define HEADER_Y (FRAME_THICKNESS + 8)
+#define DIVIDER_1_Y (FRAME_THICKNESS + 44)
+#define DATE_LAYER_Y (FRAME_THICKNESS + 50)
+#define TIME_LAYER_Y (FRAME_THICKNESS + 70)
+#define DIVIDER_2_Y (FRAME_THICKNESS + 134)
+#define FOOTER_Y (FRAME_THICKNESS + 140)
+#define STATUS_Y (FRAME_THICKNESS + 178)
 
 // Dark Slate theme: near-black background, white text, status-color accents kept as-is.
 #define THEME_BG_COLOR GColorBlack
@@ -31,7 +32,6 @@
 #define THEME_BORDER_COLOR GColorDarkGray
 #define THEME_DIVIDER_COLOR GColorLightGray
 #define THEME_ALERT_COLOR GColorRed
-#define THEME_BAR_TEXT_COLOR GColorBlack
 
 enum {
   PersistKeyFiveHourPct = 100,
@@ -124,33 +124,20 @@ static GColor color_for_pct(int pct) {
   return GColorGreen;
 }
 
-static void draw_usage_bar(GContext *ctx, int pct, time_t reset_epoch, bool top) {
+static void draw_usage_bar(GContext *ctx, int pct, bool top) {
   int y = top ? 0 : (SCREEN_H - FRAME_THICKNESS);
   GRect track_rect = GRect(0, y, SCREEN_W, FRAME_THICKNESS);
   graphics_context_set_fill_color(ctx, GColorLightGray);
   graphics_fill_rect(ctx, track_rect, 0, GCornerNone);
 
-  int clamped_pct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
-  if (pct >= 0) {
-    int fill_w = (SCREEN_W * clamped_pct) / 100;
-    GRect fill_rect = GRect(0, y, fill_w, FRAME_THICKNESS);
-    graphics_context_set_fill_color(ctx, color_for_pct(pct));
-    graphics_fill_rect(ctx, fill_rect, 0, GCornerNone);
-  }
-
-  char reset_buf[16];
-  format_countdown(reset_epoch, reset_buf, sizeof(reset_buf));
-
-  char buf[32];
   if (pct < 0) {
-    snprintf(buf, sizeof(buf), "%s -- %s", top ? "5H" : "7D", reset_buf);
-  } else {
-    snprintf(buf, sizeof(buf), "%s %d%% %s", top ? "5H" : "7D", clamped_pct, reset_buf);
+    return;
   }
-  GRect text_rect = GRect(4, y - 1, SCREEN_W - 8, FRAME_THICKNESS + 2);
-  graphics_context_set_text_color(ctx, THEME_BAR_TEXT_COLOR);
-  graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_09),
-                      text_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  int clamped_pct = pct > 100 ? 100 : pct;
+  int fill_w = (SCREEN_W * clamped_pct) / 100;
+  GRect fill_rect = GRect(0, y, fill_w, FRAME_THICKNESS);
+  graphics_context_set_fill_color(ctx, color_for_pct(pct));
+  graphics_fill_rect(ctx, fill_rect, 0, GCornerNone);
 }
 
 static void draw_side_borders(GContext *ctx) {
@@ -201,27 +188,52 @@ static void draw_bus_icon(GContext *ctx, GPoint center) {
   graphics_fill_circle(ctx, GPoint(center.x + 4, center.y + 4), 2);
 }
 
-static void draw_bottom_band(GContext *ctx, int y) {
-  // Center the battery block when there's no Bluetooth alert to pair it
-  // with, instead of leaving the right half of the band empty.
-  int battery_x = s_bluetooth_connected ? (SCREEN_W - 70) / 2 : FRAME_SIDE_THICKNESS + 6;
-
+static void draw_status_row(GContext *ctx, int y) {
+  // Icon-only status row: battery is centered alone when Bluetooth is
+  // connected (nothing to pair it with), otherwise the two icons sit
+  // side by side.
+  int battery_x = s_bluetooth_connected ? SCREEN_W / 2 - 10 : SCREEN_W / 2 - 32;
   draw_battery_icon(ctx, GPoint(battery_x, y), s_battery_pct);
 
-  char battery_buf[8];
-  snprintf(battery_buf, sizeof(battery_buf), "%d%%", s_battery_pct);
-  GRect battery_rect = GRect(battery_x + 26, y - 5, 50, 20);
-  graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
-  graphics_draw_text(ctx, battery_buf, fonts_get_system_font(FONT_KEY_GOTHIC_14),
-                      battery_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
-
   if (!s_bluetooth_connected) {
-    draw_bt_disconnected_icon(ctx, GPoint(SCREEN_W / 2 + 30, y + 5));
-    GRect bt_rect = GRect(SCREEN_W / 2 + 42, y - 5, 50, 20);
-    graphics_context_set_text_color(ctx, THEME_ALERT_COLOR);
-    graphics_draw_text(ctx, "BT", fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                        bt_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+    draw_bt_disconnected_icon(ctx, GPoint(SCREEN_W / 2 + 24, y + 5));
   }
+}
+
+static void draw_footer_band(GContext *ctx, int y) {
+  char five_pct_buf[16];
+  char seven_pct_buf[16];
+  if (s_five_hour_pct < 0) {
+    snprintf(five_pct_buf, sizeof(five_pct_buf), "5H --");
+  } else {
+    snprintf(five_pct_buf, sizeof(five_pct_buf), "5H %d%%", s_five_hour_pct);
+  }
+  if (s_seven_day_pct < 0) {
+    snprintf(seven_pct_buf, sizeof(seven_pct_buf), "7D --");
+  } else {
+    snprintf(seven_pct_buf, sizeof(seven_pct_buf), "7D %d%%", s_seven_day_pct);
+  }
+
+  char five_reset_buf[16];
+  char seven_reset_buf[16];
+  format_countdown(s_five_hour_reset, five_reset_buf, sizeof(five_reset_buf));
+  format_countdown(s_seven_day_reset, seven_reset_buf, sizeof(seven_reset_buf));
+
+  int half_w = SCREEN_W / 2;
+  GRect five_pct_rect = GRect(FRAME_SIDE_THICKNESS + 6, y, half_w - FRAME_SIDE_THICKNESS - 10, 16);
+  GRect seven_pct_rect = GRect(half_w + 4, y, half_w - FRAME_SIDE_THICKNESS - 10, 16);
+  graphics_context_set_text_color(ctx, THEME_TEXT_COLOR);
+  graphics_draw_text(ctx, five_pct_buf, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+                      five_pct_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  graphics_draw_text(ctx, seven_pct_buf, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+                      seven_pct_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+
+  GRect five_reset_rect = GRect(FRAME_SIDE_THICKNESS + 6, y + 15, half_w - FRAME_SIDE_THICKNESS - 10, 14);
+  GRect seven_reset_rect = GRect(half_w + 4, y + 15, half_w - FRAME_SIDE_THICKNESS - 10, 14);
+  graphics_draw_text(ctx, five_reset_buf, fonts_get_system_font(FONT_KEY_GOTHIC_09),
+                      five_reset_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  graphics_draw_text(ctx, seven_reset_buf, fonts_get_system_font(FONT_KEY_GOTHIC_09),
+                      seven_reset_rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 }
 
 static void draw_weather_shape(GContext *ctx, GPoint center, int shape_id) {
@@ -285,7 +297,7 @@ static void format_bus_wait(int minutes, char *buf, size_t buf_len) {
   snprintf(buf, buf_len, "%dh%02dm", hours, mins);
 }
 
-static void draw_top_band(GContext *ctx, int y) {
+static void draw_header_band(GContext *ctx, int y) {
   bool has_weather = (s_weather_temp_c != WEATHER_TEMP_UNSET);
   bool has_bus = (s_bus_next_min >= 0);
 
@@ -323,14 +335,15 @@ static void draw_top_band(GContext *ctx, int y) {
 }
 
 static void canvas_update_proc(Layer *layer, GContext *ctx) {
-  draw_usage_bar(ctx, s_five_hour_pct, s_five_hour_reset, true);
-  draw_usage_bar(ctx, s_seven_day_pct, s_seven_day_reset, false);
+  draw_usage_bar(ctx, s_five_hour_pct, true);
+  draw_usage_bar(ctx, s_seven_day_pct, false);
   draw_side_borders(ctx);
 
-  draw_top_band(ctx, TOP_BAND_Y);
+  draw_header_band(ctx, HEADER_Y);
   draw_divider(ctx, DIVIDER_1_Y);
   draw_divider(ctx, DIVIDER_2_Y);
-  draw_bottom_band(ctx, BOTTOM_BAND_Y);
+  draw_footer_band(ctx, FOOTER_Y);
+  draw_status_row(ctx, STATUS_Y);
 }
 
 static void request_update(void) {
