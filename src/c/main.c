@@ -5,7 +5,7 @@
 
 #define SCREEN_W 200
 #define SCREEN_H 228
-#define FRAME_THICKNESS 18
+#define FRAME_THICKNESS 12
 #define FRAME_SIDE_THICKNESS 3
 #define BUS_LONG_WAIT_THRESHOLD_MIN 60
 #define BATTERY_LOW_PCT 20
@@ -17,13 +17,15 @@
 
 // Region layout, top to bottom: usage bar (percentage + reset countdown
 // drawn on the bar itself) -> Header (weather | bus) -> Body (date + time)
-// -> Status (battery / Bluetooth, icon-only) -> usage bar.
+// -> Footer (reserved, currently empty, for future info) -> Status
+// (battery / Bluetooth, icon-only) -> usage bar.
 #define HEADER_Y (FRAME_THICKNESS + 10)
 #define DIVIDER_1_Y (FRAME_THICKNESS + 46)
 #define DATE_LAYER_Y (FRAME_THICKNESS + 52)
 #define TIME_LAYER_Y (FRAME_THICKNESS + 72)
 #define DIVIDER_2_Y (FRAME_THICKNESS + 140)
-#define STATUS_Y (FRAME_THICKNESS + 148)
+#define FOOTER_Y (FRAME_THICKNESS + 146)
+#define STATUS_Y (FRAME_THICKNESS + 178)
 
 // Dark Slate theme: near-black background, white text, status-color accents kept as-is.
 #define THEME_BG_COLOR GColorBlack
@@ -201,6 +203,13 @@ static void draw_bus_icon(GContext *ctx, GPoint center) {
   graphics_fill_circle(ctx, GPoint(center.x + 4, center.y + 4), 2);
 }
 
+static void draw_footer_band(GContext *ctx, int y) {
+  // Intentionally empty: reserved space between Body and Status for
+  // whatever gets added next (steps, next event, etc).
+  (void)ctx;
+  (void)y;
+}
+
 static void draw_status_row(GContext *ctx, int y) {
   // Icon-only status row: battery is centered alone when Bluetooth is
   // connected (nothing to pair it with), otherwise the two icons sit
@@ -319,6 +328,7 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   draw_header_band(ctx, HEADER_Y);
   draw_divider(ctx, DIVIDER_1_Y);
   draw_divider(ctx, DIVIDER_2_Y);
+  draw_footer_band(ctx, FOOTER_Y);
   draw_status_row(ctx, STATUS_Y);
 }
 
